@@ -1,8 +1,7 @@
 import express from "express";
 import path from "path";
-import { createServer as createViteServer } from "vite";
 import { MongoClient, ObjectId, Collection, ServerApiVersion } from "mongodb";
-import { Contact, SystemConfig } from "./src/types.js";
+import { Contact, SystemConfig } from "./src/types";
 import 'dotenv/config';
 
 const app = express();
@@ -19,6 +18,7 @@ let contactsCollection: Collection<Omit<Contact, "_id">> | null = null;
 let memoryContacts: any[] = [];
 
 // Initialize MongoDB
+let initPromise: Promise<void> | null = null;
 async function initDB() {
   const uri = process.env.MONGODB_URI;
   if (!uri) {
@@ -49,7 +49,15 @@ async function initDB() {
   }
 }
 
-initDB();
+initPromise = initDB();
+
+// Wait for database initialization on every request
+app.use(async (req, res, next) => {
+  if (initPromise) {
+    await initPromise;
+  }
+  next();
+});
 
 // API Routes
 app.get("/api/config", (req, res) => {
@@ -189,13 +197,14 @@ app.delete("/api/contacts/:id", async (req, res) => {
 });
 
 async function startServer() {
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "production" && !process.env.VERCEL) {
+    const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
       server: { middlewareMode: true },
       appType: "spa",
     });
     app.use(vite.middlewares);
-  } else {
+  } else if (!process.env.VERCEL) {
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
     app.get('*all', (req, res) => {
